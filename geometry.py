@@ -1,10 +1,16 @@
 from abc import ABC, abstractmethod
-from numpy import sqrt
+from itertools import count
+from typing import List
+import numpy as np
 from vector import Vector, Ray
+
+from scipy.spatial import KDTree
+
+
 
 
 INF = float('inf')
-EPS = 0
+EPS = .001
 
 
 class HitRecord():
@@ -19,7 +25,7 @@ class HitRecord():
         if not self:
             return
 
-        self.resultant_outward = (incoming_ray.direction @ outward_normal) < EPS
+        self.resultant_outward = (incoming_ray.direction @ outward_normal) <EPS
         if not self.resultant_outward:
             self.resultant.direction = -self.resultant.direction
 
@@ -27,56 +33,56 @@ class HitRecord():
         return self.resultant is not None
 
 
-class Hittable(ABC):
-    def __init__(self, material: "Material"):
-        self.material = material
-    
-    @abstractmethod
-    def hit(self, ray: Ray, t_min=0, t_max=INF) -> HitRecord:
-        raise NotImplementedError()
+class BoundingBox(object):
+    def __init__(self, minimum: Vector, maximum: Vector) -> None:
+        self.min = minimum
+        self.max = maximum
 
-class HittableList(Hittable):
-    def __init__(self, hittable_items=None) -> None:
-        self.items = hittable_items or []
+    def hit(self, ray: Ray, t_min=0, t_max=INF) -> bool:
+        for i in range(3):
+            if ray.direction[i] != 0:
+                points = [t_min,
+                          (self.min[i] - ray.base[i]) / ray.direction[i],
+                          (self.max[i] - ray.base[i]) / ray.direction[i],
+                          t_max]
+                _, t_min, t_max1, _ = sorted(points)
 
-    def add(self, item: Hittable) -> None:
-        self.items.append(item)
-
-    def clear(self):
-        self.items = []
-
-    def hit(self, ray: Ray, t_min=0, t_max=INF) -> HitRecord:
-        if not self.items:
-            return HitRecord()
-
-        return min([item.hit(ray, t_min, t_max) for item in self.items],
-                   key=lambda x: x.t)
+            if t_min < t_max:
+                return False
+        return True
 
 
-class Sphere(Hittable):
+class Sphere(object):
     def __init__(self, center: Vector, radius: float, material: "Material") -> None:
-        super().__init__(material)
+        self.material = material
         self.center = center
         self.radius = radius
+        self.radsquared = radius**2
+
+    def bounding_box(self):
+        return self.center - self.radius
 
     def hit(self, ray: Ray, t_min=0, t_max=INF) -> HitRecord:
         base_to_center = ray.base - self.center
 
         a = ray.direction @ ray.direction
         b = ray.direction @ base_to_center
-        c = base_to_center @ base_to_center - self.radius**2
+        c = base_to_center @ base_to_center - self.radsquared
 
         discriminant = b**2 - a * c
 
         # Not hit
-        if discriminant < 0:
+        if discriminant <= 0:
             return HitRecord()
 
-        sqrt_discriminant = sqrt(discriminant)
-        roots = [(-b - sqrt_discriminant) / a,
-                 (-b + sqrt_discriminant) / a]
+        sqrt_discriminant = np.sqrt(discriminant)
 
-        for sphere_hit_coordinate in roots:
+        def roots():
+            yield from [
+                     (-b - sqrt_discriminant) / a,
+                     (-b + sqrt_discriminant) / a]
+
+        for sphere_hit_coordinate in roots():
             in_bounds = t_min < sphere_hit_coordinate < t_max
             if not in_bounds:
                 continue
@@ -94,3 +100,15 @@ class Sphere(Hittable):
             return record
 
         return HitRecord()
+
+class World(object):
+    def __init__(self, items=None) -> None:
+        self.items = items or []
+
+    def hit(self, ray: Ray, t_min=0, t_max=INF) -> HitRecord:
+        if not self.items:
+            return HitRecord()
+
+        return min((item.hit(ray, t_min, t_max) for item in self.items),
+                   key=lambda collision: collision.t)
+

@@ -64,7 +64,7 @@ def reflect_across(incoming_direction: Vector, normal: Vector) -> Vector:
 
 def refract_across(incoming_direction: Vector, normal: Vector, index_ratio) -> Vector:
 
-    cos_theta = max(-incoming_direction @ normal, 1)
+    cos_theta = min(-incoming_direction @ normal, 1)
 
     perp_component = index_ratio * (incoming_direction + cos_theta * normal)
     parallel_component = -normal * sqrt(max(1 - perp_component.norm()**2, 0))
@@ -99,8 +99,6 @@ class Metal(Material):
 class Dielectric(Material):
     def __init__(self, index_of_refraction: float) -> None:
         self.index_of_refraction = index_of_refraction
-
-
 
     def scatter(self, ray_in: Ray, collision: HitRecord) -> MaterialRecord:
         color = Color(1, 1, 1)

@@ -5,8 +5,7 @@ class Camera():
     def __init__(
             self, image_width: int, image_height: int,
             look_from: Vector, look_at: Vector, v_up=None,
-            vfov=90, aperture_width=0, focus_dist=1.0
-            ):
+            vfov=90, aperture_width=0, focus_dist=1.0) -> None:
 
         self.image_width = image_width
         self.image_height = image_height
@@ -42,7 +41,7 @@ class Camera():
             return Vector(0, 0, 0)
 
         while True:
-            x, y = np.random.random(2)
+            x, y = (np.random.random(2) * 2) - 1
             if x**2 + y**2 > 1:
                 continue
 
@@ -58,5 +57,4 @@ class Camera():
             base
 
         return Ray(base, direction)
-
 

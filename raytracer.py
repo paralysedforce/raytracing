@@ -2,6 +2,7 @@ import sys
 import os
 import time
 from typing import List
+import pickle
 
 import numpy as np
 from numpy.random import random
@@ -9,7 +10,7 @@ from tqdm import tqdm
 from PIL import Image
 
 from vector import Ray, Vector, Color
-from geometry import Sphere, hit_world
+from geometry import Sphere, World
 from camera import Camera
 from material import Lambertian, Metal, Dielectric, Material
 
@@ -22,7 +23,7 @@ def get_color(ray: Ray, world: List[Sphere], depth: int) -> Color:
     if depth <= 0:
         return Color(0, 0, 0)
 
-    collision = hit_world(world, ray, t_min=.001)
+    collision = world.hit(ray, t_min=.001)
     if collision:
         scattering = collision.material.scatter(ray, collision)
         if scattering.absorbed:
@@ -44,7 +45,7 @@ def clamp(color: Color, samples_per_pixel: int) -> Color:
     return color.to_color()
 
 
-def get_world() -> List[Sphere]:
+def get_world() -> World:
     world = []
     glass = Dielectric(1.5)
 
@@ -76,16 +77,16 @@ def get_world() -> List[Sphere]:
                 # Glass
                 material = glass
 
-            #world.append(Sphere(center, .2, material))
+            world.append(Sphere(center, .2, material))
 
     # Big Spheres
-    world.append(Sphere(Vector(2, 1, 0),  1.0, glass))
-    world.append(Sphere(Vector(-2, 1, 0), 1.0, Lambertian(Color(.6, .1, .1))))
+    world.append(Sphere(Vector(4, 1, 0),  1.0, glass))
+    world.append(Sphere(Vector(-4, 1, 0), 1.0, Lambertian(Color(.6, .1, .1))))
     world.append(Sphere(Vector(0, 1, 0),  1.0, Metal(Color(.7, .6, .5))))
 
-    return world
+    return World(world)
 
-def get_small_world() -> List[Sphere]:
+def get_small_world() -> World:
     mat_ground = Lambertian(Color(.8, .8, .3))
     ground = Sphere(Vector(0, -100.5, -1), 100, mat_ground)
 
@@ -98,66 +99,69 @@ def get_small_world() -> List[Sphere]:
     mat_right = Dielectric(1.5)
     right = Sphere(Vector(1, 0, -1), .5, mat_right)
 
-    return [ground, center, left, right]
+    return World([ground, center, left, right])
 
 
 def get_colors():
-    checkpointing = False
-    checkpoint_filename = "image_in_progress.npy"
-    rng_filename = "rng_state.npy"
-    num_pixels_traced = 0
+    checkpointing = True
+    checkpoint_filename = "checkpoints/image_in_progress.npy"
+    world_filename = "checkpoints/world.pickle"
 
     aspect_ratio = 1.6
     image_height = 600
     image_width = int(aspect_ratio * image_height)
 
-    samples_per_pixel = 6
-    alias_block_size = np.ceil(np.sqrt(2))
-    max_depth = 20
+    samples_per_pixel = 8
+    alias_block_size = np.ceil(np.sqrt(samples_per_pixel))
+    max_depth = 15
 
-    world = get_world()
-    look_from, look_at = Vector(3, .5, -1), Vector(0, 0, -1)
+    look_from, look_at = Vector(13, 2, 3), Vector(0, 0, 0)
+    focus_dist = 10
     camera = Camera(image_width, image_height,
-                    look_from, look_at, vfov=60)
+                    look_from, look_at,
+                    vfov=20, aperture_width=.1, focus_dist=focus_dist)
 
     if checkpointing and os.path.exists(checkpoint_filename):
         colors = np.load(checkpoint_filename)
-        np.random.set_state(tuple(np.load(rng_filename, allow_pickle=True)))
     else:
         colors = np.ones((image_width, image_height, 3)) * -1
 
-    try:
-        for j in tqdm(range(image_height)):
-            for i in range(image_width):
+    if checkpointing:
+        if os.path.exists(world_filename):
+            with open(world_filename, 'rb') as f:
+                world = World(pickle.load(f))
+        else:
+            world = get_world()
+            with open(world_filename, 'wb') as f:
+                pickle.dump(world.items, f)
+    else:
+        world = get_world()
 
-                if colors[i, j, 0] != -1:
-                    continue
+    for j in tqdm(range(image_height)):
+        for i in tqdm(range(image_width)):
 
-                color = Vector(0, 0, 0)
-                for offset in range(samples_per_pixel):
-                    dx = (offset % alias_block_size) / alias_block_size
-                    dy = (offset / alias_block_size) / samples_per_pixel
+            if colors[i, j, 0] != -1:
+                continue
 
-                    horizontal_component = (i + dx) / (image_width - 1)
-                    vertical_component = (j + dy) / (image_height - 1)
-                    ray = camera.get_ray(horizontal_component, vertical_component)
-                    color += get_color(ray, world, max_depth)
+            color = Vector(0, 0, 0)
+            for offset in range(samples_per_pixel):
+                dx = (offset % alias_block_size) / alias_block_size
+                dy = (offset / alias_block_size) / samples_per_pixel
 
-                color = clamp(color, samples_per_pixel)
-                colors[i, j, :] = color.arr
+                horizontal_component = (i + dx) / (image_width - 1)
+                vertical_component = (j + dy) / (image_height - 1)
+                ray = camera.get_ray(horizontal_component, vertical_component)
+                color += get_color(ray, world, max_depth)
 
-                num_pixels_traced += 1
-                if num_pixels_traced % 1000 == 0:
-                    np.save(checkpoint_filename, colors)
-                    np.save(rng_filename, np.random.get_state())
+            color = clamp(color, samples_per_pixel)
+            colors[i, j, :] = color.arr
 
-    except KeyboardInterrupt:
         if checkpointing:
             np.save(checkpoint_filename, colors)
-            np.save(rng_filename, np.random.get_state())
-        raise KeyboardInterrupt()
 
-    os.remove(checkpoint_filename)
+    if checkpointing:
+        os.remove(checkpoint_filename)
+        os.remove(world_filename)
     return colors
 
 def colors_to_png(colors):
